@@ -1,6 +1,6 @@
 #########################################################################################
 #########################################################################################
-##########   Parametric MCMC inference for Hidden Time-Interaction Processes  ###########
+##########     MCMC inference for paramatric Time-Interaction Processes  ###########
 #########################################################################################
 #########################################################################################
 
@@ -9,11 +9,7 @@ lambda=function(psi,gamma,eta,X,j,individual.history){
   theta<-psi[2]
   alpha<-psi[3]
   beta<-psi[4]
-  #N<-j
   tk<-individual.history[j];
-  # if(j>1) ts<-individual.history[1:(j-1)] else ts<-0
-  # out=log(alpha*sum(exp(-beta*(tk-ts)))+eta*(tk^(eta-1))*exp(X*gamma+mu)*exp(-theta*(sum(individual.history<tk)-tk^eta)))
-  #### Se la prima componente e' nulla nel caso della prima osservazione, allora ok.
   out=log(alpha*sum(exp(-beta*(individual.history[j]-individual.history[individual.history<tk])))+eta*(tk^(eta-1))*exp(X*gamma+mu)*exp(-theta*(sum(individual.history<tk)-tk^eta)))
   return(out)
 }
@@ -53,7 +49,6 @@ lambda.integral.sc=function(psi,gamma,eta,X,j,individual.history){
   }else{
     p2=(exp(mu+gamma*X-theta*N)*(exp(theta*individual.history[j+1]^eta)-exp(theta*individual.history[j]^eta)))/theta
   }
-  #p2<-(exp(mu+gamma*X-theta*N))*rowSums(fint(dd$nodes,eta,theta,individual.history[j],individual.history[j+1])*dd$weights)
   return(p2)
 }
 
@@ -79,7 +74,6 @@ dTIP<-function(data,eta,gamma,psi,log){
   individual.history<-unlist(data$history)
   X<-data$X
   TT<-data$TT
-  ### SETTING PER IL CASO CON PROCESSO MARKOVIANO LATENTE: QUI ASSUMIAMO CHE SIAMO SEMPRE NEL PRIMO STATO
   if(length(individual.history)==0){
     obslik<- -lambda.integral.zerocaptures(psi,gamma,eta,X[ceiling(TT)],TT)
     out<-obslik #-capture.conditioning(psi,gamma,eta,X,TT)
@@ -104,36 +98,12 @@ dTIP<-function(data,eta,gamma,psi,log){
   return(out)
 }
 
-# sumlog<-function (x, lower = -745, upper = 709){
-#   if (missing(x)) 
-#     stop("'x' missing")
-#   s <- tryCatch(.Call("fast_sumlog", x, lower, upper, length(x)), 
-#                 `std::range_error` = function(e) {
-#                   conditionMessage(e)
-#                 })
-#   
-#   while(!is.finite(s)){
-#     x<-x[-which.min(x)]
-#     if(length(x)>1){
-#       s <- tryCatch(.Call("fast_sumlog", x, lower, upper, length(x)), 
-#                     `std::range_error` = function(e) {
-#                       conditionMessage(e)
-#                     }) 
-#     }else{
-#       s=x
-#     }
-#   }
-#   #if(!is.finite(s)) stop("Not Summable!")
-#   return(s)
-# }
-
 sumlog<-function(x) log(sum(exp(x)))
 
 #MCMC.strategies: c("Joint", "Sequential")
 
 MCMCsamplingTIPs<-function(data,MCMCiter,MCMC.strategy="Sequential",sigma.prop=0.05,burn.in=0.5){
   library(mvtnorm)
- # library(extraDistr)
   library(truncnorm)
   #### Set the algorithm ####
   gamma<-rep(0,MCMCiter)
@@ -168,7 +138,7 @@ MCMCsamplingTIPs<-function(data,MCMCiter,MCMC.strategy="Sequential",sigma.prop=0
             lden<-lapply(data, function(data) dTIP(data,eta[iter-1],gamma[iter-1],last.psi,log=TRUE))
             lprior.num<-dnorm(psi.prop[1],mean = 0,sd=1000,log = TRUE)+dgamma(psi.prop[2],10,100,log = TRUE) +dunif(psi.prop[3],0,psi.prop[4],log = TRUE) +dunif(psi.prop[4],0,1000,log = TRUE)
             lprior.den<-dnorm(last.psi[1],mean = 0,sd=1000,log=TRUE)+dgamma(last.psi[2],10,100,log = TRUE) +dunif(last.psi[3],0,last.psi[4],log = TRUE) + dunif(last.psi[4],0,1000,log = TRUE)
-            ACCEPT<-exp(sum(unlist(lnum))+lprior.num-sum(unlist(lden))-lprior.den)
+            ACCEPT<-exp(sum(unlist(lnum))+lprior.num-sum(log(2:4))-sum(unlist(lden))-lprior.den+sum(log(prop[2:4])))
             if(ACCEPT>runif(1)) psi[iter,]=psi.prop  
           }
       
@@ -188,12 +158,13 @@ MCMCsamplingTIPs<-function(data,MCMCiter,MCMC.strategy="Sequential",sigma.prop=0
             if(j==1){ 
               lprior.num<-dnorm(psi.prop[j],mean = 0,sd=10,log = TRUE)
               lprior.den<-dnorm(last.psi[j],mean = 0,sd=10,log = TRUE)
+              ACCEPT<-exp(sum(unlist(lnum))+lprior.num-sum(unlist(lden))-lprior.den)
             }
             if(j==2){
               lprior.num<-dgamma(psi.prop[j],1,1,log = TRUE)
               lprior.den<-dgamma(last.psi[j],1,1,log = TRUE)
+              ACCEPT<-exp(sum(unlist(lnum))+lprior.num-log(psi.prop[j])-sum(unlist(lden))-lprior.den+log(last.psi[j]))
             }
-            ACCEPT<-exp(sum(unlist(lnum))+lprior.num-sum(unlist(lden))-lprior.den)
             if(ACCEPT>runif(1)) psi[iter,j]=proposal 
           }
           #### Update Hawkes part ####
@@ -207,7 +178,7 @@ MCMCsamplingTIPs<-function(data,MCMCiter,MCMC.strategy="Sequential",sigma.prop=0
           lprior.den<-dunif(last.psi[j[1]],0,last.psi[j[2]],log = TRUE) + dunif(last.psi[j[2]],0,15,log = TRUE)
           lnum<-lapply(data, function(data) dTIP(data,eta[iter-1],gamma[iter-1],psi.prop,log=TRUE))
           lden<-lapply(data, function(data) dTIP(data,eta[iter-1],gamma[iter-1],last.psi,log=TRUE))
-          ACCEPT<-exp(sum(unlist(lnum))+lprior.num-sum(unlist(lden))-lprior.den)
+          ACCEPT<-exp(sum(unlist(lnum))+lprior.num-log(psi.prop[j[1]])-sum(unlist(lden))-lprior.den+log(last.psi[j[1]]))
           if(ACCEPT>runif(1)) psi[iter,j]=proposal 
       
     }
@@ -224,7 +195,7 @@ MCMCsamplingTIPs<-function(data,MCMCiter,MCMC.strategy="Sequential",sigma.prop=0
       eta.prop<-exp(rnorm(1,log(last.eta),sigma.prop))
       lnum<-lapply(data, function(data) dTIP(data,eta.prop,gamma[iter],psi[iter,],log=TRUE))
       lden<-lapply(data, function(data) dTIP(data,last.eta,gamma[iter],psi[iter,],log=TRUE))
-      ACCEPT<-exp(sum(unlist(lnum))+dgamma(eta.prop,1,1,log = TRUE)-sum(unlist(lden))-dgamma(last.eta,1,1,log=TRUE)); 
+      ACCEPT<-exp(sum(unlist(lnum))+dgamma(eta.prop,1,1,log = TRUE)-log(eta.prop)-sum(unlist(lden))-dgamma(last.eta,1,1,log=TRUE) +log(last.eta)); 
       if(ACCEPT>runif(1)) eta[iter]=eta.prop else eta[iter]=last.eta
     }
 
@@ -253,7 +224,3 @@ MCMCsamplingTIPs<-function(data,MCMCiter,MCMC.strategy="Sequential",sigma.prop=0
  out$WAIC <- -2*(sum(apply(liks,1,sumlog)-log(1/iter))-sum(apply(liks,1,var)))
  return(out)
 }
-
-
-#par.mod<-MCMCsamplingTIPs(data,MCMCiter=500)
-  
